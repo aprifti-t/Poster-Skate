@@ -1,0 +1,5 @@
+# Ignora la cartella psd
+psd/
+
+# Ignora i file di sistema macOS
+.DS_Store
