@@ -227,7 +227,17 @@
             hasGyro = true;
         }
 
-        function enableGyroscope() {
+        function toggleGyroscope() {
+            if (gyroActive) {
+                window.removeEventListener('deviceorientation', handleOrientation);
+                gyroActive = false;
+                gyroX = 0;
+                gyroY = 0;
+                gyroBtn.classList.remove('active');
+                gyroBtn.classList.remove('error');
+                gyroBtn.textContent = 'Attiva Movimento';
+                return;
+            }
             if (!window.isSecureContext) {
                 gyroBtn.classList.add('error');
                 gyroBtn.textContent = 'Serve HTTPS';
@@ -240,14 +250,17 @@
                             window.addEventListener('deviceorientation', handleOrientation);
                             gyroActive = true;
                             gyroBtn.classList.add('active');
+                            gyroBtn.classList.remove('error');
                             gyroBtn.textContent = 'Movimento Attivo';
                         } else {
                             gyroBtn.classList.add('error');
+                            gyroBtn.classList.remove('active');
                             gyroBtn.textContent = 'Permesso Negato';
                         }
                     })
                     .catch(err => {
                         gyroBtn.classList.add('error');
+                        gyroBtn.classList.remove('active');
                         gyroBtn.textContent = 'Errore Sensore';
                         console.warn('Gyroscope permission error:', err);
                     });
@@ -255,14 +268,16 @@
                 window.addEventListener('deviceorientation', handleOrientation);
                 gyroActive = true;
                 gyroBtn.classList.add('active');
+                gyroBtn.classList.remove('error');
                 gyroBtn.textContent = 'Movimento Attivo';
             } else {
                 gyroBtn.classList.add('error');
+                gyroBtn.classList.remove('active');
                 gyroBtn.textContent = 'Non Supportato';
             }
         }
 
-        gyroBtn.addEventListener('click', enableGyroscope);
+        gyroBtn.addEventListener('click', toggleGyroscope);
 
         // --- TOUCH PARALLAX (boost) ---
         function updateTouch(e) {
@@ -281,11 +296,30 @@
         poster.addEventListener('touchend',   () => { touchDecay = 1; });
 
         // --- MICROFONO ---
-        let audioCtx, analyser, dataArray;
+        let audioCtx, analyser, dataArray, micStream;
 
-        function initAudio() {
+        function toggleAudio() {
+            if (micActive) {
+                if (micStream) {
+                    micStream.getTracks().forEach(track => track.stop());
+                }
+                if (audioCtx) {
+                    audioCtx.close();
+                }
+                micActive = false;
+                audioLevel = 0;
+                micBtn.classList.remove('active');
+                micBtn.classList.remove('error');
+                micBtn.textContent = 'Attiva Microfono';
+                audioCtx = null;
+                analyser = null;
+                dataArray = null;
+                micStream = null;
+                return;
+            }
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
+                    micStream = stream;
                     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                     analyser = audioCtx.createAnalyser();
                     analyser.fftSize = 256;
@@ -294,18 +328,18 @@
                     dataArray = new Uint8Array(analyser.frequencyBinCount);
                     micActive = true;
                     micBtn.classList.add('active');
+                    micBtn.classList.remove('error');
                     micBtn.textContent = 'Microfono Attivo';
                 })
                 .catch(err => {
                     micBtn.classList.add('error');
+                    micBtn.classList.remove('active');
                     micBtn.textContent = 'Microfono Negato';
                     console.warn('Mic error:', err);
                 });
         }
 
-        micBtn.addEventListener('click', () => {
-            if (!audioCtx) initAudio();
-        });
+        micBtn.addEventListener('click', toggleAudio);
 
         // --- GLITCH CANVAS (potenziato) ---
         function drawGlitch(intensity) {
@@ -457,6 +491,9 @@
                 for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
                 const raw = sum / (dataArray.length * 255);
                 audioLevel = audioLevel * 0.5 + raw * 0.5;
+            } else {
+                audioLevel *= 0.9;
+                if (audioLevel < 0.001) audioLevel = 0;
             }
 
             // --- Noise overlay (molto più aggressivo) ---
