@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poster - Mouse + Audio Glitch</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .poster-container {
+            position: relative;
+            width: 500px;
+            height: 650px;
+            background: #648bb4;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            cursor: crosshair;
+        }
+
+        .layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: 100% 100%;
+            background-position: center;
+            background-repeat: no-repeat;
+            will-change: transform;
+        }
+
+        .layer-bg     { background-image: url('SFONDO.png'); z-index: 1; }
+        .layer-stussy { background-image: url('STUSSY.png'); z-index: 2; }
+        .layer-skater { background-image: url('SKATER_RITAGLIATO.png'); z-index: 3; }
+        .layer-skate  { background-image: url('SKATEBOARD_RITAGLIATO.png'); z-index: 4; }
+
+        /* Canvas per glitch */
+        #glitchCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        /* Disturbo noise (opacità controllata da JS) */
+        .noise-overlay {
+            position: absolute;
+            top: -50%; left: -50%; right: -50%; bottom: -50%;
+            width: 200%; height: 200%;
+            background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+            opacity: 0.2;
+            z-index: 10;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+            transition: opacity 0.1s;
+        }
+
+        .scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: repeating-linear-gradient(0deg,
+                rgba(0,0,0,0.1) 0px, rgba(0,0,0,0.1) 1px,
+                transparent 1px, transparent 3px);
+            z-index: 11; pointer-events: none;
+        }
+
+        .vignette {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.6) 100%);
+            z-index: 12; pointer-events: none;
+        }
+
+        .chromatic {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 13; pointer-events: none;
+            box-shadow:
+                inset 4px 0 3px -3px rgba(255,0,0,0.3),
+                inset -4px 0 3px -3px rgba(0,255,255,0.3);
+        }
+
+        /* Indicatore microfono */
+        .mic-indicator {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            color: rgba(255,255,255,0.5);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            pointer-events: none;
+        }
+
+        .mic-indicator .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff0044;
+            margin-right: 6px;
+            vertical-align: middle;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+
+        .mic-indicator.active .dot {
+            animation: pulse 0.3s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.3); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="poster-container" id="poster">
+    <div class="layer layer-bg"></div>
+    <div class="layer layer-stussy" id="layerStussy"></div>
+    <div class="layer layer-skater" id="layerSkater"></div>
+    <div class="layer layer-skate" id="layerSkate"></div>
+    <canvas id="glitchCanvas"></canvas>
+    <div class="noise-overlay" id="noiseOverlay"></div>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+    <div class="chromatic"></div>
+</div>
+
+<div class="mic-indicator" id="micIndicator">
+    <span class="dot" id="micDot"></span>
+    <span id="micStatus">microfono inattivo — clicca per attivare</span>
+</div>
+
+    <script>
+    (function() {
+        const poster = document.getElementById('poster');
+        const bgLayer = document.querySelector('.layer-bg');
+        const stussy = document.getElementById('layerStussy');
+        const skater = document.getElementById('layerSkater');
+        const skate = document.getElementById('layerSkate');
+        const canvas = document.getElementById('glitchCanvas');
+        const ctx = canvas.getContext('2d');
+        const noiseEl = document.getElementById('noiseOverlay');
+        const micStatus = document.getElementById('micStatus');
+        const micIndicator = document.getElementById('micIndicator');
+
+        let mouseX = 0, mouseY = 0;
+        let audioLevel = 0;
+        let micActive = false;
+
+        // --- Canvas sizing ---
+        function resizeCanvas() {
+            const rect = poster.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- MOUSE PARALLAX ---
+        poster.addEventListener('mousemove', (e) => {
+            const rect = poster.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            mouseX = (x - 0.5) * 2;
+            mouseY = (y - 0.5) * 2;
+        });
+
+        poster.addEventListener('mouseleave', () => {
+            mouseX = 0;
+            mouseY = 0;
+        });
+
+        // --- MICROFONO ---
+        let audioCtx, analyser, dataArray;
+
+        function initAudio() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                    dataArray = new Uint8Array(analyser.frequencyBinCount);
+                    micActive = true;
+                    micIndicator.classList.add('active');
+                    micStatus.textContent = 'microfono attivo — parla per glitch!';
+                })
+                .catch(err => {
+                    micStatus.textContent = 'microfono non disponibile';
+                    console.warn('Mic error:', err);
+                });
+        }
+
+        poster.addEventListener('click', () => {
+            if (!audioCtx) initAudio();
+        });
+
+        // --- GLITCH CANVAS (potenziato) ---
+        function drawGlitch(intensity) {
+            const w = canvas.width;
+            const h = canvas.height;
+            const i = Math.min(1, intensity);
+
+            ctx.clearRect(0, 0, w, h);
+
+            if (i < 0.05) return;
+
+            // --- Full-screen color flash ---
+            if (i > 0.5 && Math.random() > 0.6) {
+                ctx.fillStyle = `rgba(${Math.random()*255},${Math.random()*255},${Math.random()*255},${i * 0.15})`;
+                ctx.fillRect(0, 0, w, h);
+            }
+
+            // --- Massive horizontal corruption bars ---
+            const numBars = Math.floor(i * 20);
+            for (let b = 0; b < numBars; b++) {
+                const y = Math.random() * h;
+                const barH = 2 + Math.random() * 80 * i;
+                const r = Math.random() > 0.5 ? 255 : 0;
+                const g = Math.random() > 0.5 ? 255 : 0;
+                const bCol = Math.random() > 0.5 ? 255 : 0;
+                ctx.fillStyle = `rgba(${r},${g},${bCol},${0.05 + Math.random() * 0.4 * i})`;
+                ctx.fillRect(0, y, w, barH);
+            }
+
+            // --- Full-width displacement bars (sposta il contenuto visivamente) ---
+            const numDisplace = Math.floor(i * 8);
+            for (let d = 0; d < numDisplace; d++) {
+                const y = Math.random() * h;
+                const barH = 4 + Math.random() * 60 * i;
+                const offsetX = (Math.random() - 0.5) * 80 * i;
+                ctx.fillStyle = `rgba(0, 0, 0, ${0.2 + Math.random() * 0.3 * i})`;
+                ctx.fillRect(0, y, w, barH);
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.05 + Math.random() * 0.1})`;
+                ctx.fillRect(offsetX > 0 ? 0 : w + offsetX, y, Math.abs(offsetX), barH);
+            }
+
+            // --- Large block artifacts ---
+            const numBlocks = Math.floor(i * 12);
+            for (let b = 0; b < numBlocks; b++) {
+                const x = Math.random() * w;
+                const y = Math.random() * h;
+                const size = 4 + Math.random() * 100 * i;
+                ctx.fillStyle = `rgba(${Math.random()*255},${Math.random()*255},${Math.random()*255},${0.15 + Math.random() * 0.4 * i})`;
+                ctx.fillRect(x, y, size, size * (0.3 + Math.random() * 0.7));
+            }
+
+            // --- Glitch scanlines ---
+            const numLines = Math.floor(i * 40);
+            for (let l = 0; l < numLines; l++) {
+                const y = Math.random() * h;
+                ctx.fillStyle = `rgba(255, 255, 255, ${0.02 + Math.random() * 0.15 * i})`;
+                ctx.fillRect(0, y, w, 1 + Math.random() * 2);
+            }
+
+            // --- Bright pixel artifacts (pioggia di pixel) ---
+            const numPixels = Math.floor(i * 200);
+            for (let p = 0; p < numPixels; p++) {
+                const x = Math.random() * w;
+                const y = Math.random() * h;
+                const s = 1 + Math.random() * 6;
+                ctx.fillStyle = `rgba(${Math.random()*255},${Math.random()*255},${Math.random()*255},${0.3 + Math.random() * 0.7})`;
+                ctx.fillRect(x, y, s, s);
+            }
+
+            // --- Vertical color streaks ---
+            const numStreaks = Math.floor(i * 10);
+            for (let s = 0; s < numStreaks; s++) {
+                const x = Math.random() * w;
+                const streakH = Math.random() * h * 0.5;
+                const streakY = Math.random() * (h - streakH);
+                ctx.fillStyle = `rgba(${Math.random()*255},${Math.random()*255},${Math.random()*255},${0.05 + Math.random() * 0.2 * i})`;
+                ctx.fillRect(x, streakY, 2 + Math.random() * 10, streakH);
+            }
+
+            // --- Horizontal tearing (righe di rumore dense) ---
+            if (i > 0.3) {
+                const numTears = Math.floor(i * 6);
+                for (let t = 0; t < numTears; t++) {
+                    const y = Math.random() * h;
+                    const tearH = 1 + Math.random() * 3;
+                    for (let px = 0; px < w; px += 2 + Math.random() * 8) {
+                        ctx.fillStyle = `rgba(${Math.random()*255},${Math.random()*255},${Math.random()*255},${0.3 + Math.random() * 0.5})`;
+                        ctx.fillRect(px, y, 1 + Math.random() * 4, tearH);
+                    }
+                }
+            }
+        }
+
+        // --- GLITCH TIMING ---
+        let glitchActive = false;
+        let glitchRemaining = 0;
+        let lastGlitchTime = 0;
+        let postShakeX = 0, postShakeY = 0;
+
+        // --- MAIN LOOP ---
+        function animate(time) {
+            const t = time / 1000;
+
+            // --- Animation transforms ---
+            const stussyShakeX = Math.sin(t * 55 + 1) * 1.5;
+            const stussyShakeY = Math.cos(t * 47 + 2) * 0.6;
+            const skaterFloat = Math.sin(t * 0.4) * 6;
+            const skateRot   = Math.sin(t * 0.7) * 2.5;
+            const skateY     = Math.sin(t * 1.1) * 3;
+
+            const mStussy = 0.04;
+            const mSkater = 0.07;
+            const mSkate  = 0.12;
+
+            stussy.style.transform =
+                `translate(${mouseX * poster.offsetWidth * mStussy + stussyShakeX}px, ${mouseY * poster.offsetHeight * mStussy + stussyShakeY}px)`;
+            skater.style.transform =
+                `translate(${mouseX * poster.offsetWidth * mSkater}px, ${mouseY * poster.offsetHeight * mSkater + skaterFloat}px)`;
+            skate.style.transform =
+                `translate(${mouseX * poster.offsetWidth * mSkate}px, ${mouseY * poster.offsetHeight * mSkate}px) rotate(${skateRot}deg) translateY(${skateY}px)`;
+
+            // --- Sfondo cambia colore col mouse (full spectrum) ---
+            const bgHue = ((mouseX + 1) * 150 + (mouseY + 1) * 30) % 360;
+            const bgSat = 50 + (mouseY + 1) * 20;
+            const bgLit = 35 + (mouseX + 1) * 15;
+            poster.style.backgroundColor = `hsl(${bgHue}, ${bgSat}%, ${bgLit}%)`;
+            bgLayer.style.filter =
+                `hue-rotate(${mouseX * 25}deg) saturate(${1.2 + (mouseY + 1) * 0.2}) brightness(${0.9 + (mouseX + 1) * 0.15})`;
+
+            // --- Audio level ---
+            if (micActive && analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                const raw = sum / (dataArray.length * 255);
+                audioLevel = audioLevel * 0.5 + raw * 0.5;
+            }
+
+            // --- Noise overlay (molto più aggressivo) ---
+            const baseNoise = 0.25;
+            const audioNoiseBoost = audioLevel * 1.0;
+            noiseEl.style.opacity = Math.min(1, baseNoise + audioNoiseBoost);
+
+            // --- Intensità glitch (molto più sensibile all'audio) ---
+            const intensity = Math.min(1, audioLevel * 4 + Math.random() * 0.35);
+
+            // --- Screen shake sul poster ---
+            const shakeIntensity = intensity * (micActive ? 2 : 0.5);
+            if (shakeIntensity > 0.1) {
+                postShakeX = (Math.random() - 0.5) * shakeIntensity * 8;
+                postShakeY = (Math.random() - 0.5) * shakeIntensity * 5;
+                poster.style.transform = `translate(${postShakeX}px, ${postShakeY}px)`;
+            } else {
+                poster.style.transform = '';
+            }
+
+            // --- Glitch trigger (molto più frequente) ---
+            if (!glitchActive && time - lastGlitchTime > 40) {
+                if (Math.random() < intensity * 0.85 + 0.08) {
+                    glitchActive = true;
+                    glitchRemaining = 30 + Math.random() * 200 * intensity;
+                    lastGlitchTime = time;
+                }
+            }
+
+            // --- RGB split diretto sulle layer (via filter) ---
+            if (intensity > 0.3 && Math.random() > 0.7) {
+                const hueShift = (Math.random() - 0.5) * 180;
+                stussy.style.filter = `hue-rotate(${hueShift}deg) contrast(${1 + intensity})`;
+                skater.style.filter = `hue-rotate(${-hueShift * 0.5}deg) brightness(${1 + intensity * 0.3})`;
+                skate.style.filter = `hue-rotate(${hueShift * 0.3}deg) saturate(${1 + intensity})`;
+            } else {
+                stussy.style.filter = '';
+                skater.style.filter = '';
+                skate.style.filter = '';
+            }
+
+            // --- Canvas glitch ---
+            if (glitchActive) {
+                if (glitchRemaining > 0) {
+                    glitchRemaining -= 16;
+                    drawGlitch(intensity);
+                } else {
+                    glitchActive = false;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    poster.style.transform = '';
+                }
+            } else {
+                if (intensity > 0.25 && Math.random() < 0.04) {
+                    drawGlitch(intensity * 0.6);
+                } else {
+                    if (Math.random() > 0.95) ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        requestAnimationFrame(animate);
+    })();
+    </script>
+</body>
+</html>
