@@ -26,6 +26,32 @@
             cursor: crosshair;
         }
 
+        .gyro-btn {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 300;
+            background: rgba(0,0,0,0.85);
+            border: 2px solid #0f0;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            padding: 15px 25px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border-radius: 4px;
+        }
+
+        .gyro-btn:active {
+            background: rgba(0,255,0,0.2);
+        }
+
+        .gyro-btn.hidden {
+            display: none;
+        }
+
         .layer {
             position: absolute;
             top: 0;
@@ -202,6 +228,8 @@
 </head>
 <body>
 
+<div class="gyro-btn" id="gyroBtn">ATTIVA SENSORE DI MOVIMENTO</div>
+
 <div class="poster-container" id="poster">
     <div class="layer layer-bg"></div>
     <div class="layer layer-stussy" id="layerStussy"></div>
@@ -240,6 +268,7 @@
         const micIndicator = document.getElementById('micIndicator');
         const gyroStatus = document.getElementById('gyroStatus');
         const gyroIndicator = document.getElementById('gyroIndicator');
+        const gyroBtn = document.getElementById('gyroBtn');
 
         let mouseX = 0, mouseY = 0;
         let audioLevel = 0;
@@ -329,6 +358,7 @@
                             gyroActive = true;
                             gyroIndicator.classList.add('active');
                             gyroStatus.textContent = 'giroscopio attivo';
+                            gyroBtn.classList.add('hidden');
                         } else {
                             gyroStatus.textContent = 'giroscopio negato — usa touch';
                         }
@@ -351,7 +381,13 @@
             }
         }
 
-        // Attiva giroscopio al primo tocco o click (richiesto da iOS)
+        // Attiva giroscopio al click sul pulsante esplicito
+        gyroBtn.addEventListener('click', () => {
+            logDebug('Click su pulsante giroscopio');
+            enableGyroscope();
+        });
+
+        // Fallback: attiva giroscopio al tocco/click sul poster (non sempre valido su iOS)
         poster.addEventListener('click', () => {
             logDebug('Click su poster');
             enableGyroscope();
